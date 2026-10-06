@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>LocalLeet</title>
+  <meta name="description" content="Offline Python interview practice with an on-device AI tutor.">
+  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="LocalLeet">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="modulepreload" href="js/app.js">
+</head>
+<body>
+  <header class="topbar">
+    <button id="back-btn" class="icon-btn" aria-label="Back to problems" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="brand" id="brand">
+      <img src="icons/icon.svg" alt="" width="26" height="26">
+      <span id="top-title">LocalLeet</span>
+    </div>
+    <div class="top-right">
+      <span id="timer" class="timer" hidden></span>
+      <span id="py-pill" class="pill" title="Python runtime">Python…</span>
+      <span id="net-pill" class="pill" hidden>Offline</span>
+      <button id="settings-btn" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============================== home -->
+  <main id="home" class="view">
+    <section class="hero">
+      <div>
+        <h1>Python interview practice. Runs entirely on your device.</h1>
+        <p class="muted">Code runs in real Python (WebAssembly). The AI tutor is a small model that runs on your phone, so no internet is needed once everything is downloaded.</p>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><span id="stat-solved">0</span><small>solved</small></div>
+        <div class="stat"><span id="stat-total">0</span><small>problems</small></div>
+        <div class="stat" id="countdown-stat" hidden><span id="stat-countdown">–</span><small>until interview</small></div>
+      </div>
+    </section>
+
+    <div id="offline-card" class="card notice" hidden></div>
+
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search problems" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <select id="diff-filter" aria-label="Difficulty">
+        <option value="">All levels</option>
+        <option>Easy</option><option>Medium</option><option>Hard</option>
+      </select>
+      <label class="check"><input id="hide-solved" type="checkbox"> Hide solved</label>
+    </div>
+
+    <div id="problem-list"></div>
+    <footer class="foot muted">
+      Interview tip: say your approach out loud before coding, write simple tests, and state the time and space complexity.
+    </footer>
+  </main>
+
+  <!-- ============================== problem -->
+  <main id="problem" class="view" hidden>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button role="tab" data-tab="problem" class="active">Problem</button>
+      <button role="tab" data-tab="code" class="mobile-only">Code</button>
+      <button role="tab" data-tab="results" class="mobile-only">Results <span id="results-badge" class="badge" hidden></span></button>
+      <button role="tab" data-tab="tutor">AI Tutor</button>
+    </nav>
+
+    <div class="pv" id="pv" data-tab="problem">
+      <section class="pane pane-problem" id="pane-problem"></section>
+
+      <section class="pane pane-tutor" id="pane-tutor">
+        <div class="tutor-head">
+          <div id="model-status" class="model-status"></div>
+          <div class="seg" id="tutor-mode">
+            <button data-mode="tutor" class="active">Tutor</button>
+            <button data-mode="interviewer">Mock interviewer</button>
+          </div>
+        </div>
+        <div class="chips" id="quick-chips">
+          <button data-q="hint">💡 Hint</button>
+          <button data-q="bug">🐞 Find my bug</button>
+          <button data-q="complexity">⏱ Complexity</button>
+          <button data-q="approach">🧭 Approach</button>
+        </div>
+        <div id="chat" class="chat" aria-live="polite"></div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" rows="1" placeholder="Ask the tutor…" autocapitalize="sentences"></textarea>
+          <button id="chat-send" class="btn primary" type="submit">Send</button>
+        </form>
+        <div id="ai-locked" class="ai-locked" hidden>
+          <strong>AI is off in interview mode.</strong>
+          <p>Your real interview doesn't allow AI tools, so practice without them. End interview mode to use the tutor again.</p>
+        </div>
+      </section>
+
+      <section class="pane pane-code" id="pane-code">
+        <div class="code-toolbar">
+          <button id="run-btn" class="btn primary">▶ Run tests</button>
+          <select id="part-select" aria-label="Which parts to test" hidden></select>
+          <span class="spacer"></span>
+          <button id="interview-btn" class="btn ghost" title="45-minute timer, AI and hints off">⏱ Interview<span class="wide-only"> mode</span></button>
+          <button id="reset-btn" class="btn ghost" title="Reset to starter code">Reset</button>
+        </div>
+        <div id="editor" class="editor"></div>
+        <div id="keybar" class="keybar" aria-label="Coding keys"></div>
+      </section>
+
+      <section class="pane pane-results" id="pane-results">
+        <div id="results" class="results"><p class="muted">Run your code to see test results here.</p></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============================== settings -->
+  <dialog id="settings" class="sheet">
+    <form method="dialog" class="sheet-head">
+      <h2>Settings</h2>
+      <button class="icon-btn" aria-label="Close">✕</button>
+    </form>
+    <div class="sheet-body">
+      <section>
+        <h3>On-device AI tutor</h3>
+        <p class="muted" id="gpu-info">Checking WebGPU…</p>
+        <div id="model-list" class="model-list"></div>
+        <label class="check"><input id="auto-load" type="checkbox"> Load the model automatically when I open the tutor</label>
+      </section>
+      <section>
+        <h3>Offline</h3>
+        <p id="offline-info" class="muted">Checking…</p>
+        <p id="storage-info" class="muted"></p>
+        <button id="persist-btn" class="btn ghost">Ask the browser to keep my data</button>
+      </section>
+      <section>
+        <h3>Practice</h3>
+        <label class="field">Interview date (shows a countdown)
+          <input id="interview-date" type="datetime-local">
+        </label>
+        <label class="field">Editor font size
+          <input id="font-size" type="range" min="11" max="22" step="1">
+        </label>
+        <label class="field">Interview mode length (minutes)
+          <input id="interview-len" type="number" min="5" max="120" step="5">
+        </label>
+        <button id="reset-progress" class="btn danger">Reset all progress &amp; code</button>
+      </section>
+      <section class="muted small">
+        <p>Python runs via Pyodide (CPython compiled to WebAssembly). AI uses WebLLM (WebGPU) or wllama (llama.cpp, CPU) with Qwen2.5-Coder models. Nothing you type leaves your device.</p>
+        <p>Tip for iPhone: open in Safari → Share → <b>Add to Home Screen</b>. Installed apps keep their offline data; Safari can clear data for sites you haven't installed.</p>
+      </section>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

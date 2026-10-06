@@ -43,7 +43,10 @@ jobs:
             -archivePath ios/build/LocalLeet.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee ios/build-log.txt | grep -E "error:|warning: .*(LocalLeet|ios/)|BUILD|ARCHIVE" || true
-          test -d ios/build/LocalLeet.xcarchive/Products/Applications/LocalLeet.app
+          APP=ios/build/LocalLeet.xcarchive/Products/Applications/LocalLeet.app
+          test -f "$APP/web/index.html" && test -f "$APP/web/vendor/pyodide/pyodide.asm.wasm"
+          test -d "$APP/Frameworks/llama.framework"
+          echo "app bundle contents OK"; du -sh "$APP"
       - name: Package unsigned .ipa
         run: |
           cd ios/build

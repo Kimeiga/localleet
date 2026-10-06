@@ -20,6 +20,29 @@ Offline Python interview practice for iPhone, iPad and desktop, with an AI tutor
 
 Then it works fully offline.
 
+## Native iOS app
+
+`ios/` contains a native Swift app that wraps the same web UI (all problems, offline Python) and runs the AI tutor natively:
+
+- **Apple on-device model** (iOS 26+, Apple Intelligence devices): built in, no download.
+- **Qwen2.5-Coder 1.5B** (1.1 GB) and **Ornith 1.5 9B** (5.8 GB) through llama.cpp on the GPU (Metal), downloaded in the app. Ornith 9B is much smarter but needs a lot of memory: aim for an iPhone with 12 GB of RAM (17 Pro or newer) or an M-series iPad.
+
+How it's built:
+
+```bash
+ios/scripts/prepare.sh        # copies the web app into the bundle, fetches llama.cpp (pinned)
+cd ios && xcodegen generate   # creates LocalLeet.xcodeproj (brew install xcodegen)
+open LocalLeet.xcodeproj      # run on a device; the llama.cpp framework has no simulator slice
+```
+
+CI:
+
+- **GitHub Actions** (`.github/workflows/ios.yml`) builds an unsigned `.ipa` on every push and uploads it as an artifact. You can sideload it with AltStore, SideStore or Sideloadly using a free Apple ID; free-ID installs expire after 7 days.
+- **Codemagic** (`codemagic.yaml`):
+  - `ios-unsigned` builds the same sideloadable `.ipa`.
+  - `ios-testflight` signs the app and uploads it to TestFlight. It needs the Apple Developer Program, an App Store Connect app with bundle ID `io.github.kimeiga.localleet`, and an App Store Connect API key added to Codemagic under the name `LocalLeet`.
+- For Ornith 9B, enable **Increased Memory Limit** on the App ID and set `INCREASED_MEMORY_LIMIT=true` in the TestFlight workflow.
+
 ## Hosting
 
 It's a static site, so any static host works. **GitHub Pages:** repo **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)`**. The app will be at `https://<user>.github.io/localleet/`. iOS needs HTTPS for service workers, and Pages provides it.

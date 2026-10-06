@@ -1,0 +1,91 @@
+# Codemagic builds for the native iOS app in ios/.
+#
+#  ios-unsigned    → an unsigned LocalLeet.ipa artifact you can sideload
+#                    (AltStore / SideStore / Sideloadly sign it with your Apple ID).
+#                    Needs no Apple Developer account.
+#  ios-testflight  → a signed build uploaded to TestFlight. Needs the Apple
+#                    Developer Program ($99/yr), an app record in App Store Connect
+#                    with bundle ID io.github.kimeiga.localleet, and an App Store
+#                    Connect API key added in Codemagic (Teams → Integrations).
+#                    Set its name below under integrations.app_store_connect.
+
+definitions:
+  scripts:
+    - &prepare
+      name: Bundle web app + download llama.cpp
+      script: ios/scripts/prepare.sh
+    - &xcodegen
+      name: Generate Xcode project
+      script: |
+        brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+        cd ios && xcodegen generate
+
+workflows:
+  ios-unsigned:
+    name: iOS app (unsigned .ipa)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+    scripts:
+      - *prepare
+      - *xcodegen
+      - name: Build unsigned archive
+        script: |
+          xcodebuild archive \
+            -project ios/LocalLeet.xcodeproj \
+            -scheme LocalLeet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath ios/build/LocalLeet.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: Package .ipa
+        script: |
+          cd ios/build
+          rm -rf Payload && mkdir Payload
+          cp -R LocalLeet.xcarchive/Products/Applications/LocalLeet.app Payload/
+          zip -qry LocalLeet-unsigned.ipa Payload
+    artifacts:
+      - ios/build/LocalLeet-unsigned.ipa
+
+  ios-testflight:
+    name: iOS app → TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: LocalLeet   # ← name of your App Store Connect API key in Codemagic
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: io.github.kimeiga.localleet
+      vars:
+        # Set to "true" after enabling "Increased Memory Limit" on the App ID
+        # (helps the Ornith 9B model fit in memory).
+        INCREASED_MEMORY_LIMIT: "false"
+    scripts:
+      - *prepare
+      - *xcodegen
+      - name: Use signing profiles
+        script: xcode-project use-profiles --project ios/LocalLeet.xcodeproj
+      - name: Build signed .ipa
+        script: |
+          EXTRA="CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+          if [ "$INCREASED_MEMORY_LIMIT" = "true" ]; then
+            EXTRA="$EXTRA LL_ENTITLEMENTS=LocalLeet/LocalLeet-IncreasedMemory.entitlements"
+          fi
+          xcode-project build-ipa \
+            --project ios/LocalLeet.xcodeproj \
+            --scheme LocalLeet \
+            --archive-xcargs "$EXTRA"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

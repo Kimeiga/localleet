@@ -1,3 +1,8 @@
 node_modules/
 .DS_Store
 *.log
+ios/LocalLeet/web/
+ios/Frameworks/
+ios/LocalLeet.xcodeproj/
+ios/build/
+*.ipa

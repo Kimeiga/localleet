@@ -4,6 +4,7 @@ import { createEditor, renderKeyBar } from "./editor.js";
 import * as runner from "./runner.js";
 import * as ai from "./ai.js";
 import * as store from "./store.js";
+import { NATIVE } from "./native.js";
 
 // ------------------------------------------------------------------ utils
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -510,7 +511,9 @@ function modelLabel(key) {
 }
 
 async function chosenModel() {
-  settings.model ??= await ai.recommendedModel();
+  if (!ai.MODELS.some((m) => m.key === settings.model && m.available !== false)) {
+    settings.model = await ai.recommendedModel();
+  }
   return settings.model;
 }
 
@@ -663,23 +666,28 @@ async function renderModelList() {
   if (!$("#settings").open) return;
   const caps = await ai.capabilities();
   const rec = await ai.recommendedModel();
+  if (NATIVE) await ai.refreshModels();
   const cached = await Promise.all(ai.MODELS.map((m) => ai.isCached(m.key)));
   list.innerHTML = ai.MODELS.map((m, i) => {
-    const unsupported = m.engine === "webllm" && !caps.webgpu;
+    const unsupported = m.available === false || (m.engine === "webllm" && !caps.webgpu);
+    const builtIn = m.engine === "apple";
+    const why = m.reason || (m.engine === "webllm" && !caps.webgpu ? "needs WebGPU" : "");
     const isCur = aiState.modelKey === m.key;
     const loaded = isCur && aiState.status === "ready";
     const loading = isCur && aiState.status === "loading";
     return `<div class="model ${settings.model === m.key ? "current" : ""}">
       <div class="name">${esc(m.label)} ${m.key === rec ? `<span class="tag">recommended</span>` : ""}</div>
-      <div class="info">${esc(m.note)} · ${m.size}${cached[i] ? " · <b>downloaded ✓</b>" : ""}${unsupported ? " · needs WebGPU" : ""}</div>
+      <div class="info">${esc(m.note)}${m.size ? ` · ${esc(m.size)}` : ""}${cached[i] && !builtIn ? " · <b>downloaded ✓</b>" : ""}${unsupported && why ? ` · <span style="color:var(--bad)">${esc(why)}</span>` : ""}</div>
       <div class="actions">
         ${loaded ? `<span class="pill ok">loaded</span>` : loading ? `<span class="pill">${Math.round(aiState.progress * 100)}%</span>`
-          : `<button class="btn small ${cached[i] ? "" : "primary"}" data-load="${m.key}" ${unsupported || aiState.status === "loading" ? "disabled" : ""}>${cached[i] ? "Load" : "Download"}</button>`}
-        ${cached[i] && !loading ? `<button class="btn small ghost" data-del="${m.key}" title="Delete download">🗑</button>` : ""}
+          : `<button class="btn small ${cached[i] ? "" : "primary"}" data-load="${m.key}" ${unsupported || aiState.status === "loading" ? "disabled" : ""}>${builtIn ? "Use" : cached[i] ? "Load" : "Download"}</button>`}
+        ${cached[i] && !loading && !builtIn ? `<button class="btn small ghost" data-del="${m.key}" title="Delete download">🗑</button>` : ""}
       </div>
     </div>`;
   }).join("");
-  $("#gpu-info").textContent = caps.webgpu
+  $("#gpu-info").textContent = NATIVE
+    ? `Models run natively on this device's GPU (${Math.round(window.LocalLeetNative?.ramGB || 0)} GB RAM). Downloads stay on the device; keep the app open while downloading.`
+    : caps.webgpu
     ? `WebGPU available${caps.f16 ? " (fp16)" : ""}: models run on your GPU.`
     : "WebGPU isn't available here (it needs iOS 26+ / Safari 26+, or recent Chrome). The CPU models still work, just slower.";
 }
@@ -741,6 +749,13 @@ $("#persist-btn").addEventListener("click", async () => {
 
 async function renderOfflineInfo() {
   const info = $("#offline-info");
+  if (NATIVE) {
+    info.textContent = "Everything is built into the app, so problems, Python and downloaded AI models all work offline.";
+    $("#persist-btn").hidden = true;
+    $("#install-tip").hidden = true;
+    $("#storage-info").textContent = "";
+    return;
+  }
   const ready = await appCached();
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   info.innerHTML = `${ready ? "✓ The app and Python are saved for offline use." : "Downloading app files for offline use… (keep this page open once while online)"}<br>
@@ -768,7 +783,7 @@ async function appCached() {
 
 // ------------------------------------------------------------------ service worker
 async function registerSW() {
-  if (!("serviceWorker" in navigator)) return;
+  if (NATIVE || !("serviceWorker" in navigator)) return; // the iOS app bundles everything
   try {
     await navigator.serviceWorker.register("sw.js");
     navigator.serviceWorker.addEventListener("message", (e) => {
@@ -783,6 +798,7 @@ async function registerSW() {
 }
 
 async function showOfflineCard() {
+  if (NATIVE) return;
   const card = $("#offline-card");
   const ready = await appCached();
   if (ready) {
@@ -827,6 +843,8 @@ document.addEventListener("visibilitychange", () => {
 setInterval(renderCountdown, 60_000);
 
 updateNet();
+if (NATIVE) document.documentElement.classList.add("native");
+ai.init().then(renderModelStatus).catch((e) => console.warn("native AI init failed", e));
 renderHome();
 route();
 registerSW();

@@ -13,11 +13,12 @@ const targets = [
   ["icon-192.png", 192, false],
   ["icon-512.png", 512, false],
   ["icon-maskable-512.png", 512, true],
+  ["../ios/LocalLeet/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png", 1024, false, true],
 ];
-for (const [name, size, maskable] of targets) {
+for (const [name, size, maskable, opaque] of targets) {
   await page.setViewportSize({ width: size, height: size });
   // iOS rounds corners itself, so apple/maskable icons are full-bleed squares.
-  const square = name.startsWith("apple") || maskable;
+  const square = name.startsWith("apple") || maskable || opaque;
   const inner = square ? svg.replace(/rx="112"/, 'rx="0"') : svg;
   const pad = maskable ? size * 0.1 : 0;
   await page.setContent(`<html><body style="margin:0;background:${square ? "#4a5ef5" : "transparent"}">

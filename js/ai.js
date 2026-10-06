@@ -1,10 +1,13 @@
-// On-device AI tutor. Two engines, both fully local after the first download:
+// On-device AI tutor. In the browser, two engines, both fully local after the
+// first download:
 //   - WebLLM (WebGPU): fast; Safari 26+ on iPhone/iPad/Mac, Chrome, Edge.
 //   - wllama (llama.cpp compiled to wasm, CPU): fallback without WebGPU.
 // Model weights are cached by the engines (Cache Storage / OPFS) so the tutor
-// keeps working in airplane mode.
+// keeps working in airplane mode. Inside the native iOS app, models run in
+// Swift instead (Apple's on-device model or llama.cpp on Metal); see native.js.
+import { NATIVE, call as nativeCall, onNativeEvent } from "./native.js";
 
-export const MODELS = [
+const WEB_MODELS = [
   {
     key: "coder-0.5b",
     label: "Qwen2.5-Coder 0.5B",
@@ -39,12 +42,26 @@ export const MODELS = [
   },
 ];
 
+// Live binding: replaced by the native catalog inside the iOS app.
+export let MODELS = NATIVE ? [] : WEB_MODELS;
+
+/** Call once at startup (loads the native model list in the iOS app). */
+export async function init() {
+  if (NATIVE) await refreshModels();
+}
+
+export async function refreshModels() {
+  if (NATIVE) MODELS = await nativeCall("list");
+  return MODELS;
+}
+
 const vendor = (p) => new URL(`../vendor/${p}`, import.meta.url).href;
 
 let caps = null;
 export async function capabilities() {
   if (caps) return caps;
-  caps = { webgpu: false, f16: false };
+  caps = { webgpu: false, f16: false, native: NATIVE };
+  if (NATIVE) return caps;
   try {
     if (navigator.gpu) {
       const adapter = await navigator.gpu.requestAdapter();
@@ -60,6 +77,10 @@ export async function capabilities() {
 }
 
 export async function recommendedModel() {
+  if (NATIVE) {
+    const usable = MODELS.filter((m) => m.available);
+    return (usable.find((m) => m.engine === "apple") || usable[0] || MODELS[0])?.key ?? null;
+  }
   return (await capabilities()).webgpu ? "coder-0.5b" : "coder-0.5b-cpu";
 }
 
@@ -100,6 +121,11 @@ async function webllmId(model) {
 }
 
 export async function unload() {
+  if (NATIVE) {
+    await nativeCall("unload").catch(() => {});
+    set({ status: "idle", modelKey: null, progress: 0, text: "" });
+    return;
+  }
   try {
     await engine?.unload();
   } catch {}
@@ -117,6 +143,22 @@ export async function load(key) {
   if (state.status === "ready" && state.modelKey === key) return;
   await unload();
   set({ status: "loading", modelKey: key, progress: 0, text: "Starting…" });
+  if (NATIVE) {
+    const off = onNativeEvent((e) => {
+      if (e.type === "progress" && e.key === key) set({ progress: e.progress, text: e.text });
+    });
+    try {
+      await nativeCall("load", { key });
+      await refreshModels();
+      set({ status: "ready", progress: 1, text: "" });
+    } catch (e) {
+      set({ status: "error", modelKey: key, text: String(e?.message || e) });
+      throw e;
+    } finally {
+      off();
+    }
+    return;
+  }
   try {
     if (model.engine === "webllm") {
       if (!(await capabilities()).webgpu) throw new Error("WebGPU isn't available in this browser. Pick a CPU model instead.");
@@ -173,6 +215,21 @@ let abort = null;
 export async function chat(messages, { onToken, maxTokens = 320, temperature = 0.3 } = {}) {
   if (state.status !== "ready") throw new Error("Model not loaded");
   let text = "";
+  if (NATIVE) {
+    const requestId = Math.random().toString(36).slice(2);
+    const off = onNativeEvent((e) => {
+      if (e.type === "token" && e.requestId === requestId) onToken?.(e.text);
+    });
+    abort = () => nativeCall("stop");
+    try {
+      text = await nativeCall("chat", { messages, maxTokens, temperature, requestId });
+    } finally {
+      off();
+      abort = null;
+    }
+    onToken?.(text);
+    return text;
+  }
   if (engine) {
     const stream = await engine.chat.completions.create({
       messages,
@@ -220,6 +277,7 @@ export function stop() {
 
 export async function isCached(key) {
   const model = MODELS.find((m) => m.key === key);
+  if (NATIVE) return !!model?.downloaded;
   try {
     if (model.engine === "webllm") {
       const { hasModelInCache } = await webllmModule();
@@ -236,6 +294,11 @@ export async function isCached(key) {
 export async function deleteCached(key) {
   const model = MODELS.find((m) => m.key === key);
   if (state.modelKey === key) await unload();
+  if (NATIVE) {
+    await nativeCall("delete", { key });
+    await refreshModels();
+    return;
+  }
   if (model.engine === "webllm") {
     const { deleteModelAllInfoInCache } = await webllmModule();
     await deleteModelAllInfoInCache(await webllmId(model));
@@ -269,7 +332,7 @@ Stay in character as the interviewer:
 
 // CPU models spend most of their time reading the prompt, so they get a
 // shorter one.
-export const isCompact = () => MODELS.find((m) => m.key === state.modelKey)?.engine === "wllama";
+export const isCompact = () => !NATIVE && MODELS.find((m) => m.key === state.modelKey)?.engine === "wllama";
 
 export function buildMessages({ mode, problem, partIndex, code, results, history, userText }) {
   const k = isCompact() ? 0.55 : 1;

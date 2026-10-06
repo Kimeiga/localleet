@@ -1,0 +1,62 @@
+name: ios
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - "js/**"
+      - "css/**"
+      - "problems/**"
+      - "py/**"
+      - "index.html"
+      - "vendor/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Bundle web app + download llama.cpp
+        run: ios/scripts/prepare.sh
+      - name: Generate Xcode project
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          cd ios && xcodegen generate
+      # The llama.cpp xcframework ships a device slice only, so build for a
+      # generic iOS device with signing off.
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ios/LocalLeet.xcodeproj \
+            -scheme LocalLeet \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath ios/build/LocalLeet.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee ios/build-log.txt | grep -E "error:|warning: .*(LocalLeet|ios/)|BUILD|ARCHIVE" || true
+          test -d ios/build/LocalLeet.xcarchive/Products/Applications/LocalLeet.app
+      - name: Package unsigned .ipa
+        run: |
+          cd ios/build
+          mkdir Payload
+          cp -R LocalLeet.xcarchive/Products/Applications/LocalLeet.app Payload/
+          zip -qry LocalLeet-unsigned.ipa Payload
+          du -sh LocalLeet-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalLeet-unsigned-ipa
+          path: ios/build/LocalLeet-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ios/build-log.txt

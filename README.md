@@ -45,5 +45,6 @@ Problems live in `problems/*.js`. Each one has a Markdown `prompt`, a `starter`,
 
 ## Notes
 
-- Small on-device models make mistakes. Treat the tutor like a study buddy, not an oracle, and check its claims by running the tests.
+- Small on-device models make mistakes, and sometimes write code despite being told not to. Code blocks longer than 3 lines in tutor replies are hidden behind a spoiler. Treat the tutor like a study buddy, not an oracle, and check its claims by running the tests.
+- The GPU (WebGPU) models answer in seconds. The CPU fallback is much slower: in testing, a hint took 3–4 minutes on a server CPU, so prefer a WebGPU device (iOS 26+).
 - Nothing you type leaves your device. The only network requests are the app files and, when you choose, the model download from Hugging Face.

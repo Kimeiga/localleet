@@ -8,6 +8,12 @@
 // Usage: node scripts/e2e-offline.mjs [--ai] [--safari]
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 const port = 8091;
@@ -23,6 +29,42 @@ if (safari) await ctx.addInitScript(() => { try { delete WebAssembly.Suspending;
 // through Node's fetch. Useful in sandboxes where Chromium can't reach the
 // internet directly but Node can.
 let offline = false;
+// Big files can't go through route.fulfill, so download them with Node and
+// redirect the browser to a tiny local file server (with CORS + ranges).
+const bigDir = path.join(process.env.MODEL_CACHE_DIR || tmpdir(), "localleet-e2e-models");
+let bigPort = 0;
+async function bigFileURL(url) {
+  mkdirSync(bigDir, { recursive: true });
+  const name = path.basename(new URL(url).pathname);
+  const file = path.join(bigDir, name);
+  if (!existsSync(file)) {
+    console.log("node: downloading", name);
+    const res = await fetch(url);
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(file + ".part"));
+    (await import("node:fs")).renameSync(file + ".part", file);
+  }
+  if (!bigPort) {
+    const srv = createServer((req, res) => {
+      const f = path.join(bigDir, path.basename(req.url.split("?")[0]));
+      if (!existsSync(f)) return res.writeHead(404).end();
+      const size = statSync(f).size;
+      const h = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "*", "Accept-Ranges": "bytes", "Content-Type": "application/octet-stream" };
+      if (req.method === "OPTIONS") return res.writeHead(204, { ...h, "Access-Control-Allow-Headers": "*" }).end();
+      const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || "");
+      if (m) {
+        const start = Number(m[1]), end = m[2] ? Number(m[2]) : size - 1;
+        res.writeHead(206, { ...h, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": end - start + 1 });
+        return req.method === "HEAD" ? res.end() : createReadStream(f, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { ...h, "Content-Length": size });
+      req.method === "HEAD" ? res.end() : createReadStream(f).pipe(res);
+    });
+    await new Promise((r) => srv.listen(0, r));
+    bigPort = srv.address().port;
+    srv.unref();
+  }
+  return `http://localhost:${bigPort}/${name}`;
+}
 if (process.env.NODE_FETCH) {
   await ctx.route((url) => !url.href.startsWith(base), async (route) => {
     if (offline) return route.abort("internetdisconnected");
@@ -30,6 +72,10 @@ if (process.env.NODE_FETCH) {
     const headers = {};
     for (const [k, v] of Object.entries(req.headers())) if (/^(range|accept)$/i.test(k)) headers[k] = v;
     try {
+      if (/\.gguf(\?|$)/.test(req.url())) {
+        const local = await bigFileURL(req.url());
+        return route.fulfill({ status: 302, headers: { location: local, "access-control-allow-origin": "*" } });
+      }
       const res = await fetch(req.url(), { method: req.method(), headers });
       const body = Buffer.from(await res.arrayBuffer());
       const out = { "access-control-allow-origin": "*", "access-control-expose-headers": "*" };

@@ -481,6 +481,24 @@ function updateInterviewUI() {
 // ------------------------------------------------------------------ AI tutor
 let aiState = ai.getState();
 let generating = false;
+
+// Small models sometimes ignore "don't write the solution". Hide any sizable
+// code block behind a spoiler so the student has to opt in to seeing it.
+function guardCode(html) {
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  for (const pre of t.content.querySelectorAll("pre")) {
+    if (pre.textContent.trim().split("\n").length <= 3) continue;
+    const d = document.createElement("details");
+    d.className = "spoiler";
+    d.innerHTML = `<summary>🙈 The tutor wrote code. Try it yourself first; tap to reveal.</summary>`;
+    pre.replaceWith(d);
+    d.appendChild(pre);
+  }
+  return t.innerHTML;
+}
+const mdReply = (s) => guardCode(md(s));
+
 ai.onState((s) => {
   aiState = s;
   renderModelStatus();
@@ -583,7 +601,7 @@ function renderChat() {
   }
   box.innerHTML = hist
     .filter((m) => !m.hidden)
-    .map((m) => (m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : `<div class="msg assistant"><div class="md">${md(m.content)}</div></div>`))
+    .map((m) => (m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>` : `<div class="msg assistant"><div class="md">${mdReply(m.content)}</div></div>`))
     .join("");
   box.scrollTop = box.scrollHeight;
 }
@@ -622,7 +640,7 @@ async function ask(text, { hidden = false } = {}) {
         if (!raf) {
           raf = requestAnimationFrame(() => {
             raf = 0;
-            bubble.innerHTML = md(reply.content);
+            bubble.innerHTML = mdReply(reply.content);
             $("#chat").scrollTop = $("#chat").scrollHeight;
           });
         }

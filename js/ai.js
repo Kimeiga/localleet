@@ -136,7 +136,10 @@ export async function load(key) {
       }
     } else {
       wllama = await newWllama();
-      await wllama.loadModelFromHF(model.gguf, {
+      // loadModelFromHF always queries the Hugging Face API (fails offline);
+      // loadModelFromUrl checks the local cache first.
+      const url = `https://huggingface.co/${model.gguf.repo}/resolve/main/${model.gguf.file}`;
+      await wllama.loadModelFromUrl(url, {
         n_ctx: 4096,
         progressCallback: ({ loaded, total }) =>
           set({ progress: total ? loaded / total : 0, text: `Downloading ${fmtMB(loaded)} / ${fmtMB(total)}` }),
@@ -167,7 +170,7 @@ const fmtMB = (b) => `${Math.round((b || 0) / 1e6)} MB`;
 let abort = null;
 
 /** Stream a chat completion. messages: [{role, content}]. Returns full text. */
-export async function chat(messages, { onToken, maxTokens = 400, temperature = 0.3 } = {}) {
+export async function chat(messages, { onToken, maxTokens = 320, temperature = 0.3 } = {}) {
   if (state.status !== "ready") throw new Error("Model not loaded");
   let text = "";
   if (engine) {
@@ -250,7 +253,7 @@ const clip = (s, n) => (s && s.length > n ? s.slice(0, n) + "\n…(truncated)" :
 
 const TUTOR = `You are a friendly, concise Python coding-interview tutor running offline on the student's phone.
 Rules:
-- Never write the full solution or large blocks of solution code. The student must write it themselves.
+- NEVER write the solution or any code longer than 2 lines. Do not output code blocks. The student must write the code themselves.
 - Give ONE focused hint or observation at a time, at most 4 short sentences.
 - Prefer guiding questions ("What happens when the list is empty?") and naming techniques (hash map, two pointers, BFS, heap...).
 - Tiny generic Python syntax examples (1-3 lines) are fine when the student is stuck on syntax.
@@ -264,7 +267,12 @@ Stay in character as the interviewer:
 - Do not give the solution. If they're stuck, give a small nudge like a real interviewer would.
 - Keep each message under 4 sentences.`;
 
+// CPU models spend most of their time reading the prompt, so they get a
+// shorter one.
+export const isCompact = () => MODELS.find((m) => m.key === state.modelKey)?.engine === "wllama";
+
 export function buildMessages({ mode, problem, partIndex, code, results, history, userText }) {
+  const k = isCompact() ? 0.55 : 1;
   const part = problem.parts?.[partIndex];
   const statement = problem.parts
     ? `${problem.intro}\n\nCurrent part: ${part.title}\n${part.prompt}`
@@ -280,9 +288,9 @@ export function buildMessages({ mode, problem, partIndex, code, results, history
       : `Test results: ${results.tests.filter((t) => t.pass).length}/${results.tests.length} passing.${failing ? `\nFailing:\n${clip(failing, 700)}` : ""}`
     : "They haven't run the tests yet.";
 
-  const context = `Problem: ${problem.title}\n${clip(statement, 1800)}\n\nStudent's current code:\n\`\`\`python\n${clip(code, 2400)}\n\`\`\`\n${status}`;
+  const context = `Problem: ${problem.title}\n${clip(statement, 1800 * k)}\n\nStudent's current code:\n\`\`\`python\n${clip(code, 2400 * k)}\n\`\`\`\n${status}`;
   const msgs = [{ role: "system", content: `${mode === "interviewer" ? INTERVIEWER : TUTOR}\n\n${context}` }];
-  let budget = 1600;
+  let budget = 1600 * k;
   const recent = [];
   for (let i = history.length - 1; i >= 0 && budget > 0; i--) {
     const m = history[i];

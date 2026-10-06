@@ -285,6 +285,8 @@ pre.out.err { background: var(--bad-bg); color: var(--bad); }
 .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.assistant .md p:last-child { margin-bottom: 0; }
 .msg.note { align-self: center; background: none; color: var(--muted); font-size: 13px; text-align: center; max-width: 520px; }
+.spoiler { margin: 6px 0 10px; }
+.spoiler > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .chat-form { display: flex; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg); }
 .chat-form textarea { flex: 1; resize: none; max-height: 140px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font-size: 16px; }
 .ai-locked { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; background: color-mix(in srgb, var(--bg) 92%, transparent); }

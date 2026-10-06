@@ -16,13 +16,31 @@ const server = spawn(process.execPath, [fileURLToPath(new URL("./serve.mjs", imp
 await new Promise((r) => setTimeout(r, 800));
 const withAI = process.argv.includes("--ai");
 const safari = process.argv.includes("--safari");
-// Chromium ignores HTTPS_PROXY; pass it through when one is configured
-// (and keep localhost direct: Playwright proxies loopback by default).
-process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK = "1";
-const proxy = process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: "localhost,127.0.0.1" } : undefined;
-const browser = await chromium.launch({ proxy });
+const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 if (safari) await ctx.addInitScript(() => { try { delete WebAssembly.Suspending; } catch {} WebAssembly.Suspending = undefined; });
+// NODE_FETCH=1 relays the browser's external requests (the model download)
+// through Node's fetch. Useful in sandboxes where Chromium can't reach the
+// internet directly but Node can.
+let offline = false;
+if (process.env.NODE_FETCH) {
+  await ctx.route((url) => !url.href.startsWith(base), async (route) => {
+    if (offline) return route.abort("internetdisconnected");
+    const req = route.request();
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers())) if (/^(range|accept)$/i.test(k)) headers[k] = v;
+    try {
+      const res = await fetch(req.url(), { method: req.method(), headers });
+      const body = Buffer.from(await res.arrayBuffer());
+      const out = { "access-control-allow-origin": "*", "access-control-expose-headers": "*" };
+      for (const k of ["content-type", "content-range", "accept-ranges", "etag", "last-modified"]) if (res.headers.get(k)) out[k] = res.headers.get(k);
+      await route.fulfill({ status: res.status, headers: out, body });
+    } catch (e) {
+      console.log("relay failed", req.url(), String(e));
+      await route.abort("failed");
+    }
+  });
+}
 const page = await ctx.newPage();
 ctx.on("serviceworker", (w) => w.on("console", (m) => console.log("SW:", m.text().slice(0, 200))));
 page.on("pageerror", (e) => console.log("pageerror:", String(e)));
@@ -69,7 +87,8 @@ if (withAI) {
 }
 
 server.kill();
-if (withAI) await ctx.route((url) => !url.href.startsWith(base), (route) => route.abort("internetdisconnected"));
+offline = true;
+if (withAI && !process.env.NODE_FETCH) await ctx.route((url) => !url.href.startsWith(base), (route) => route.abort("internetdisconnected"));
 await new Promise((r) => setTimeout(r, 300));
 console.log("server stopped; external hosts blocked");
 await page.goto(base);
